@@ -1,12 +1,17 @@
 package com.systelab.aws;
 
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.ec2.Ec2Client;
+import software.amazon.awssdk.services.ec2.model.*;
 import software.amazon.awssdk.services.rds.RdsClient;
 import software.amazon.awssdk.services.rds.model.*;
+
+import java.util.Arrays;
 
 public class RDSService {
     private Region region = Region.EU_CENTRAL_1;
     private RdsClient rds = RdsClient.builder().region(region).build();
+    private Ec2Client ec2 = Ec2Client.builder().region(region).build();
 
     public void printInstance(DBInstance dbInstance) {
         System.out.println(dbInstance.dbName());
@@ -56,7 +61,44 @@ public class RDSService {
         rds.deleteDBInstance(request);
     }
 
-    public String createInstance(String name) {
+    public String createSecurityGroup(String vpcID) {
+        CreateSecurityGroupRequest request = CreateSecurityGroupRequest.builder()
+                .groupName("temp3-rds-security-group")
+                .description("Created from the RDS").vpcId(vpcID).build();
+
+        CreateSecurityGroupResponse response = ec2.createSecurityGroup(request);
+        addInboundRules(response.groupId());
+     //   addOutboundRules(response.groupId());
+        return response.groupId();
+    }
+
+    public void addInboundRules(String groupID) {
+
+        IpRange ipRange1 = IpRange.builder().cidrIp("172.31.0.0/16").build();
+        IpRange ipRange2 = IpRange.builder().cidrIp("10.0.0.0/16").build();
+        IpRange ipRange3 = IpRange.builder().cidrIp("213.9.182.105/32").build();
+
+        IpPermission ipPermission = IpPermission.builder().ipRanges(Arrays.asList(new IpRange[]{ipRange1, ipRange2, ipRange3}))
+                .ipProtocol("tcp")
+                .fromPort(1521)
+                .toPort(1521).build();
+        AuthorizeSecurityGroupIngressRequest request =
+                AuthorizeSecurityGroupIngressRequest.builder().groupId(groupID).ipPermissions(ipPermission).build();
+        ec2.authorizeSecurityGroupIngress(request);
+    }
+
+    public void addOutboundRules(String groupID) {
+
+        IpRange ipRange1 = IpRange.builder().cidrIp("0.0.0.0/0").build();
+
+        IpPermission ipPermission = IpPermission.builder().ipRanges(Arrays.asList(new IpRange[]{ipRange1})).ipProtocol("-1").fromPort(-1).toPort(-1).build();
+        AuthorizeSecurityGroupEgressRequest request =
+                AuthorizeSecurityGroupEgressRequest.builder().groupId(groupID).ipPermissions(ipPermission).build();
+        ec2.authorizeSecurityGroupEgress(request);
+    }
+
+
+    public String createInstance(String name,String vpcID) {
 /*
             CreateDbParameterGroupRequest request=CreateDbParameterGroupRequest.builder()
                     .dbParameterGroupName(groupName)
@@ -81,6 +123,7 @@ public class RDSService {
             rds.modifyDBParameterGroup( new ModifyDbParameterGroupRequest().withDbParameterGroupName(DbParameterGroupName).withParameters(parameters));
 */
 
+        String securityGroup= createSecurityGroup(vpcID);
         CreateDbInstanceRequest request2 = CreateDbInstanceRequest.builder()
                 .dbInstanceIdentifier(name)
                 .engine("oracle-se2")
@@ -93,11 +136,11 @@ public class RDSService {
                 .dbName("MG2")
                 .masterUsername("username")
                 .masterUserPassword("password")
+                .vpcSecurityGroupIds(securityGroup)
                 .port(1521)
                 .backupRetentionPeriod(2)
                 .publiclyAccessible(false)
-                .dbParameterGroupName("default.oracle-se2-12.2")
-                .dbSecurityGroups().build();
+                .dbParameterGroupName("default.oracle-se2-12.2").build();
 
         CreateDbInstanceResponse response2 = rds.createDBInstance(request2);
         String instanceId = response2.dbInstance().dbInstanceIdentifier();
